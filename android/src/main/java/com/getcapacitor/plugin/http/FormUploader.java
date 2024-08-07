@@ -116,6 +116,53 @@ public class FormUploader {
         writer.flush();
     }
 
+    /** TV: add targetFileName params
+     * Adds a upload file section to the request
+     *
+     * @param fieldName
+     * @param uploadFile
+     * @param targetFileName
+     * @param data
+     * @throws IOException
+     */
+    public void addFilePart(String fieldName, File uploadFile, String targetFileName, JSObject data) throws IOException {
+        String fileName = uploadFile.getName();
+        writer.append(LINE_FEED);
+        writer.append("--" + boundary).append(LINE_FEED);
+        writer.append("Content-Disposition: form-data; name=\"" + fieldName + "\"; filename=\"" + targetFileName + "\"").append(LINE_FEED);
+        writer.append("Content-Type: " + URLConnection.guessContentTypeFromName(fileName)).append(LINE_FEED).append(LINE_FEED);
+        writer.flush();
+
+        FileInputStream inputStream = new FileInputStream(uploadFile);
+        byte[] buffer = new byte[4096];
+        int bytesRead;
+        while ((bytesRead = inputStream.read(buffer)) != -1) {
+            outputStream.write(buffer, 0, bytesRead);
+        }
+        outputStream.flush();
+        inputStream.close();
+
+        if (data != null) {
+            Iterator<String> keyIterator = data.keys();
+            while (keyIterator.hasNext()) {
+                String key = keyIterator.next();
+                try {
+                    Object value = data.get(key);
+                    if (value == null || !(value instanceof String)) {
+                        continue;
+                    }
+                    appendFieldToWriter(key, value.toString());
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        writer.append(LINE_FEED).append("--" + boundary + "--").append(LINE_FEED);
+        writer.flush();
+    }
+
+
     /**
      * Adds a header field to the request.
      *

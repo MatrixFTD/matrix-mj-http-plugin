@@ -4,6 +4,9 @@ import static com.getcapacitor.plugin.http.MimeType.APPLICATION_JSON;
 import static com.getcapacitor.plugin.http.MimeType.APPLICATION_VND_API_JSON;
 
 import android.content.Context;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.text.TextUtils;
 import android.util.Base64;
 import android.util.Log;
@@ -79,7 +82,9 @@ public class HttpRequestHandler {
             if (connectTimeout != null) connection.setConnectTimeout(connectTimeout);
             if (readTimeout != null) connection.setReadTimeout(readTimeout);
 
-            connection.setRequestHeaders(headers);
+            if(headers != null) {
+                connection.setRequestHeaders(headers);
+            }
             return this;
         }
 
@@ -88,7 +93,7 @@ public class HttpRequestHandler {
         }
 
         public HttpURLConnectionBuilder setUrlParams(JSObject params, boolean shouldEncode)
-            throws URISyntaxException, MalformedURLException, JSONException {
+                throws URISyntaxException, MalformedURLException, JSONException {
             String initialQuery = url.getQuery();
             String initialQueryBuilderStr = initialQuery == null ? "" : initialQuery;
 
@@ -173,7 +178,7 @@ public class HttpRequestHandler {
     }
 
     private static JSObject buildResponse(CapacitorHttpUrlConnection connection, ResponseType responseType)
-        throws IOException, JSONException {
+            throws IOException, JSONException {
         int statusCode = connection.getResponseCode();
 
         JSObject output = new JSObject();
@@ -294,7 +299,10 @@ public class HttpRequestHandler {
         String urlString = call.getString("url", "");
         String method = call.getString("method", "").toUpperCase();
         JSObject headers = call.getObject("headers");
-        JSObject params = call.getObject("params");
+        JSObject params = new JSObject();
+        if(call.hasOption("params")){
+            params = call.getObject("params");
+        }
         Integer connectTimeout = call.getInt("connectTimeout");
         Integer readTimeout = call.getInt("readTimeout");
         ResponseType responseType = ResponseType.parse(call.getString("responseType"));
@@ -303,13 +311,13 @@ public class HttpRequestHandler {
 
         URL url = new URL(urlString);
         HttpURLConnectionBuilder connectionBuilder = new HttpURLConnectionBuilder()
-            .setUrl(url)
-            .setMethod(method)
-            .setHeaders(headers)
-            .setUrlParams(params)
-            .setConnectTimeout(connectTimeout)
-            .setReadTimeout(readTimeout)
-            .openConnection();
+                .setUrl(url)
+                .setMethod(method)
+                .setHeaders(headers)
+                .setUrlParams(params)
+                .setConnectTimeout(connectTimeout)
+                .setReadTimeout(readTimeout)
+                .openConnection();
 
         CapacitorHttpUrlConnection connection = connectionBuilder.build();
 
@@ -338,7 +346,11 @@ public class HttpRequestHandler {
         String filePath = call.getString("filePath");
         String fileDirectory = call.getString("fileDirectory", FilesystemUtils.DIRECTORY_DOCUMENTS);
         JSObject headers = call.getObject("headers");
-        JSObject params = call.getObject("params");
+
+        JSObject params = new JSObject();
+        if(call.hasOption("params")){
+            params = call.getObject("params");
+        }
         Integer connectTimeout = call.getInt("connectTimeout");
         Integer readTimeout = call.getInt("readTimeout");
 
@@ -346,13 +358,13 @@ public class HttpRequestHandler {
         final File file = FilesystemUtils.getFileObject(context, filePath, fileDirectory);
 
         HttpURLConnectionBuilder connectionBuilder = new HttpURLConnectionBuilder()
-            .setUrl(url)
-            .setMethod(method)
-            .setHeaders(headers)
-            .setUrlParams(params)
-            .setConnectTimeout(connectTimeout)
-            .setReadTimeout(readTimeout)
-            .openConnection();
+                .setUrl(url)
+                .setMethod(method)
+                .setHeaders(headers)
+                .setUrlParams(params)
+                .setConnectTimeout(connectTimeout)
+                .setReadTimeout(readTimeout)
+                .openConnection();
 
         ICapacitorHttpUrlConnection connection = connectionBuilder.build();
         InputStream connectionInputStream = connection.getInputStream();
@@ -376,6 +388,20 @@ public class HttpRequestHandler {
         };
     }
 
+    private static void copyInputStreamToFile(InputStream inputStream, File file)
+            throws IOException {
+
+        // append = false
+        try (FileOutputStream outputStream = new FileOutputStream(file, false)) {
+            int read;
+            byte[] bytes = new byte[64];
+            while ((read = inputStream.read(bytes)) != -1) {
+                outputStream.write(bytes, 0, read);
+            }
+        }
+
+    }
+
     /**
      * Makes an Http Request to upload a file based on the PluginCall parameters
      * @param call The Capacitor PluginCall that contains the options need for an Http request
@@ -388,35 +414,103 @@ public class HttpRequestHandler {
         String urlString = call.getString("url");
         String method = call.getString("method").toUpperCase();
         String filePath = call.getString("filePath");
-        String fileDirectory = call.getString("fileDirectory", FilesystemUtils.DIRECTORY_DOCUMENTS);
+        String fileDirectory = call.getString("fileDirectory", FilesystemUtils.DIRECTORY_CACHE);
         String name = call.getString("name", "file");
         Integer connectTimeout = call.getInt("connectTimeout");
         Integer readTimeout = call.getInt("readTimeout");
         JSObject headers = call.getObject("headers");
-        JSObject params = call.getObject("params");
+        JSObject params = new JSObject();
+        if(call.hasOption("params")){
+            params = call.getObject("params");
+        }
         JSObject data = call.getObject("data");
         ResponseType responseType = ResponseType.parse(call.getString("responseType"));
 
         URL url = new URL(urlString);
+        File file;
 
-        File file = FilesystemUtils.getFileObject(context, filePath, fileDirectory);
+        if(filePath.contains("content://")){ //content provider uri
+            Uri fileUri = Uri.parse(filePath);
+            InputStream  contentInputStream = context.getContentResolver().openInputStream(fileUri);
+
+            String fileName= getFileName(fileUri,context);
+            if(data.has("fileName")){
+                String[] fileStrSplit = fileName.split("\\.");
+                if(fileStrSplit.length>1){
+                    fileName = data.get("fileName").toString() + "." + fileStrSplit[fileStrSplit.length-1];
+                }
+            }
+
+            String mimeType = context.getContentResolver().getType(fileUri);
+            Log.d("tom0", "********* uploadFile: " + mimeType);
+
+            Log.d("tom0", "uploadFile: " + fileName);
+
+            file = FilesystemUtils.getFileObject(context, fileName, FilesystemUtils.DIRECTORY_CACHE);
+            copyInputStreamToFile(contentInputStream, file);//copy content stream to local file
+
+        }else{ //regular file path
+            file = FilesystemUtils.getFileObject(context, filePath, fileDirectory);
+        }
+
+        String newShortFileName = getShortFileName(file.getName());
 
         HttpURLConnectionBuilder connectionBuilder = new HttpURLConnectionBuilder()
-            .setUrl(url)
-            .setMethod(method)
-            .setHeaders(headers)
-            .setUrlParams(params)
-            .setConnectTimeout(connectTimeout)
-            .setReadTimeout(readTimeout)
-            .openConnection();
+                .setUrl(url)
+                .setMethod(method)
+                .setHeaders(headers)
+                .setUrlParams(params)
+                .setConnectTimeout(connectTimeout)
+                .setReadTimeout(readTimeout)
+                .openConnection();
 
         CapacitorHttpUrlConnection connection = connectionBuilder.build();
         connection.setDoOutput(true);
 
         FormUploader builder = new FormUploader(connection.getHttpConnection());
-        builder.addFilePart(name, file, data);
+        //TV - 04/11/21
+        //builder.addFilePart(name, file, data);
+        builder.addFilePart(name, file, newShortFileName ,data);
+        //END TV
         builder.finish();
 
         return buildResponse(connection, responseType);
+    }
+
+    public static String getFileName(Uri uri,Context context) {
+        String result = null;
+        if (uri.getScheme().equals("content")) {
+            Cursor cursor = context.getContentResolver().query(uri, null, null, null, null);
+            try {
+                if (cursor != null && cursor.moveToFirst()) {
+                    result = cursor.getString(cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME));
+                }
+            } finally {
+                cursor.close();
+            }
+        }
+
+        if (result == null) {
+            result = uri.getPath();
+            int cut = result.lastIndexOf('/');
+            if (cut != -1) {
+                result = result.substring(cut + 1);
+            }
+        }
+        return result;
+    }
+
+    public static String getShortFileName(String fileName){
+        int maxLength = 50;
+
+        int extStartIndex = fileName.lastIndexOf(".");
+
+        String fileExt = fileName.substring(extStartIndex+1);
+        String fileNameWithoutExt = fileName.substring(0,extStartIndex);
+        int fileNameWithoutExtNewLength = Math.min(fileNameWithoutExt.length(),maxLength-fileExt.length()-1);
+
+        String shortFileName = fileNameWithoutExt.substring(0,fileNameWithoutExtNewLength) + "." + fileExt;
+
+        return shortFileName;
     }
 }

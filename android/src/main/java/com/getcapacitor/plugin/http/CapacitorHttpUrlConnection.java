@@ -160,7 +160,7 @@ public class CapacitorHttpUrlConnection implements ICapacitorHttpUrlConnection {
         if (contentType == null || contentType.isEmpty()) return;
 
         String dataString = "";
-        if (contentType.contains("application/json")) {
+        if (body != null && contentType.contains("application/json")) {
             dataString = body.toString();
         } else if (contentType.contains("application/x-www-form-urlencoded")) {
             StringBuilder builder = new StringBuilder();
