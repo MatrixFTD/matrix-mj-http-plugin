@@ -1,11 +1,6 @@
 package com.getcapacitor.plugin.http;
 
-import android.os.Build;
-import android.os.LocaleList;
-import android.text.TextUtils;
-import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
-import com.getcapacitor.PluginCall;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -18,7 +13,6 @@ import java.net.UnknownServiceException;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import org.json.JSONException;
 
@@ -34,7 +28,7 @@ public class CapacitorHttpUrlConnection implements ICapacitorHttpUrlConnection {
      */
     public CapacitorHttpUrlConnection(HttpURLConnection conn) {
         connection = conn;
-        this.setDefaultRequestProperties();
+        connection.setRequestProperty("Accept-Charset", java.nio.charset.StandardCharsets.UTF_8.name());
     }
 
     /**
@@ -127,14 +121,6 @@ public class CapacitorHttpUrlConnection implements ICapacitorHttpUrlConnection {
     }
 
     /**
-     * Sets whether automatic HTTP redirects should be disabled
-     * @param disableRedirects the flag to determine if redirects should be followed
-     */
-    public void setDisableRedirects(boolean disableRedirects) {
-        connection.setInstanceFollowRedirects(!disableRedirects);
-    }
-
-    /**
      * Sets the request headers given a JSObject of key-value pairs
      * @param headers the JSObject values to map to the HttpUrlConnection request headers
      */
@@ -164,69 +150,47 @@ public class CapacitorHttpUrlConnection implements ICapacitorHttpUrlConnection {
 
     /**
      *
-     * @param call
+     * @param body
      * @throws JSONException
      * @throws IOException
      */
-    public void setRequestBody(PluginCall call, JSValue body) throws JSONException, IOException {
+    public void setRequestBody(JSObject body) throws JSONException, IOException {
         String contentType = connection.getRequestProperty("Content-Type");
-        String dataString = "";
 
         if (contentType == null || contentType.isEmpty()) return;
 
+        String dataString = "";
         if (contentType.contains("application/json")) {
-            JSArray jsArray = null;
-            if (body != null) {
-                dataString = body.toString();
-            } else {
-                jsArray = call.getArray("data", null);
-            }
-            if (jsArray != null) {
-                dataString = jsArray.toString();
-            } else if (body == null) {
-                dataString = call.getString("data");
-            }
-            this.writeRequestBody(dataString.toString());
+            dataString = body.toString();
         } else if (contentType.contains("application/x-www-form-urlencoded")) {
             StringBuilder builder = new StringBuilder();
-
-            JSObject obj = body.toJSObject();
-            Iterator<String> keys = obj.keys();
+            Iterator<String> keys = body.keys();
             while (keys.hasNext()) {
                 String key = keys.next();
-                Object d = obj.get(key);
+                Object d = body.get(key);
                 builder.append(key).append("=").append(URLEncoder.encode(d.toString(), "UTF-8"));
 
                 if (keys.hasNext()) {
                     builder.append("&");
                 }
             }
-            this.writeRequestBody(builder.toString());
+            dataString = builder.toString();
         } else if (contentType.contains("multipart/form-data")) {
             FormUploader uploader = new FormUploader(connection);
 
-            JSObject obj = body.toJSObject();
-            Iterator<String> keys = obj.keys();
+            Iterator<String> keys = body.keys();
             while (keys.hasNext()) {
                 String key = keys.next();
 
-                String d = obj.get(key).toString();
+                String d = body.get(key).toString();
                 uploader.addFormField(key, d);
             }
             uploader.finish();
-        } else {
-            this.writeRequestBody(body.toString());
+            dataString = body.toString();
         }
-    }
 
-    /**
-     * Writes the provided string to the HTTP connection managed by this instance.
-     *
-     * @param body The string value to write to the connection stream.
-     */
-    private void writeRequestBody(String body) throws IOException {
         try (DataOutputStream os = new DataOutputStream(connection.getOutputStream())) {
-            os.write(body.getBytes(StandardCharsets.UTF_8));
+            os.write(dataString.getBytes(StandardCharsets.UTF_8));
             os.flush();
         }
     }
@@ -354,40 +318,5 @@ public class CapacitorHttpUrlConnection implements ICapacitorHttpUrlConnection {
      */
     public Map<String, List<String>> getHeaderFields() {
         return connection.getHeaderFields();
-    }
-
-    /**
-     * Sets the default request properties on the newly created connection.
-     * This is called as early as possible to allow overrides by user-provided values.
-     */
-    private void setDefaultRequestProperties() {
-        connection.setRequestProperty("Accept-Charset", StandardCharsets.UTF_8.name());
-        String acceptLanguage = buildDefaultAcceptLanguageProperty();
-        if (!TextUtils.isEmpty(acceptLanguage)) {
-            connection.setRequestProperty("Accept-Language", acceptLanguage);
-        }
-    }
-
-    /**
-     * Builds and returns a locale string describing the device's current locale preferences.
-     */
-    private String buildDefaultAcceptLanguageProperty() {
-        Locale locale;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            locale = LocaleList.getDefault().get(0);
-        } else {
-            locale = Locale.getDefault();
-        }
-        String result = "";
-        String lang = locale.getLanguage();
-        String country = locale.getCountry();
-        if (!TextUtils.isEmpty(lang)) {
-            if (!TextUtils.isEmpty(country)) {
-                result = String.format("%s-%s,%s;q=0.5", lang, country, lang);
-            } else {
-                result = String.format("%s;q=0.5", lang);
-            }
-        }
-        return result;
     }
 }

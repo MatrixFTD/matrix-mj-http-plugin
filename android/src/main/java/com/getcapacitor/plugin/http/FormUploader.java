@@ -15,26 +15,29 @@ import org.json.JSONException;
 
 public class FormUploader {
 
-    private final String LINE_FEED = "\r\n";
     private final String boundary;
-    private final String charset = "UTF-8";
-    private final OutputStream outputStream;
-    private final PrintWriter prWriter;
+    private static final String LINE_FEED = "\r\n";
+    private HttpURLConnection httpConn;
+    private String charset = "UTF-8";
+    private OutputStream outputStream;
+    private PrintWriter writer;
 
     /**
      * This constructor initializes a new HTTP POST request with content type
      * is set to multipart/form-data
-     * @param connection The HttpUrlConnection to use to upload a Form
-     * @throws IOException Thrown if unable to parse the OutputStream of the connection
+     *
+     * @param conn
+     * @throws java.io.IOException
      */
-    public FormUploader(HttpURLConnection connection) throws IOException {
+    public FormUploader(HttpURLConnection conn) throws IOException {
         UUID uuid = UUID.randomUUID();
         boundary = uuid.toString();
+        httpConn = conn;
 
-        connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+        httpConn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
 
-        outputStream = connection.getOutputStream();
-        prWriter = new PrintWriter(new OutputStreamWriter(outputStream, charset), true);
+        outputStream = httpConn.getOutputStream();
+        writer = new PrintWriter(new OutputStreamWriter(outputStream, charset), true);
     }
 
     /**
@@ -44,49 +47,29 @@ public class FormUploader {
      * @param value field value
      */
     public void addFormField(String name, String value) {
-        prWriter
-            .append(LINE_FEED)
-            .append("--")
-            .append(boundary)
-            .append(LINE_FEED)
-            .append("Content-Disposition: form-data; name=\"")
-            .append(name)
-            .append("\"")
-            .append(LINE_FEED)
-            .append("Content-Type: text/plain; charset=")
-            .append(charset)
-            .append(LINE_FEED)
-            .append(LINE_FEED)
-            .append(value)
-            .append(LINE_FEED)
-            .append("--")
-            .append(boundary)
-            .append("--")
-            .append(LINE_FEED);
-        prWriter.flush();
+        writer.append(LINE_FEED);
+        writer.append("--").append(boundary).append(LINE_FEED);
+        writer.append("Content-Disposition: form-data; name=\"").append(name).append("\"").append(LINE_FEED);
+        writer.append("Content-Type: text/plain; charset=").append(charset).append(LINE_FEED);
+        writer.append(LINE_FEED);
+        writer.append(value);
+        writer.append(LINE_FEED).append("--").append(boundary).append("--").append(LINE_FEED);
+        writer.flush();
     }
 
     /**
-     * Adds a form field to the prWriter
+     * Adds a form field to the writer
      *
      * @param name  field name
      * @param value field value
      */
     private void appendFieldToWriter(String name, String value) {
-        prWriter
-            .append(LINE_FEED)
-            .append("--")
-            .append(boundary)
-            .append(LINE_FEED)
-            .append("Content-Disposition: form-data; name=\"")
-            .append(name)
-            .append("\"")
-            .append(LINE_FEED)
-            .append("Content-Type: text/plain; charset=")
-            .append(charset)
-            .append(LINE_FEED)
-            .append(LINE_FEED)
-            .append(value);
+        writer.append(LINE_FEED);
+        writer.append("--").append(boundary).append(LINE_FEED);
+        writer.append("Content-Disposition: form-data; name=\"").append(name).append("\"").append(LINE_FEED);
+        writer.append("Content-Type: text/plain; charset=").append(charset).append(LINE_FEED);
+        writer.append(LINE_FEED);
+        writer.append(value);
     }
 
     /**
@@ -94,26 +77,15 @@ public class FormUploader {
      *
      * @param fieldName  name attribute in <input type="file" name="..." />
      * @param uploadFile a File to be uploaded
-     * @throws IOException Thrown if unable to parse the OutputStream of the connection
+     * @throws IOException
      */
     public void addFilePart(String fieldName, File uploadFile, JSObject data) throws IOException {
         String fileName = uploadFile.getName();
-        prWriter
-            .append(LINE_FEED)
-            .append("--")
-            .append(boundary)
-            .append(LINE_FEED)
-            .append("Content-Disposition: form-data; name=\"")
-            .append(fieldName)
-            .append("\"; filename=\"")
-            .append(fileName)
-            .append("\"")
-            .append(LINE_FEED)
-            .append("Content-Type: ")
-            .append(URLConnection.guessContentTypeFromName(fileName))
-            .append(LINE_FEED)
-            .append(LINE_FEED);
-        prWriter.flush();
+        writer.append(LINE_FEED);
+        writer.append("--" + boundary).append(LINE_FEED);
+        writer.append("Content-Disposition: form-data; name=\"" + fieldName + "\"; filename=\"" + fileName + "\"").append(LINE_FEED);
+        writer.append("Content-Type: " + URLConnection.guessContentTypeFromName(fileName)).append(LINE_FEED).append(LINE_FEED);
+        writer.flush();
 
         FileInputStream inputStream = new FileInputStream(uploadFile);
         byte[] buffer = new byte[4096];
@@ -130,9 +102,9 @@ public class FormUploader {
                 String key = keyIterator.next();
                 try {
                     Object value = data.get(key);
-
-                    if (!(value instanceof String)) continue;
-
+                    if (value == null || !(value instanceof String)) {
+                        continue;
+                    }
                     appendFieldToWriter(key, value.toString());
                 } catch (JSONException e) {
                     e.printStackTrace();
@@ -140,8 +112,8 @@ public class FormUploader {
             }
         }
 
-        prWriter.append(LINE_FEED).append("--").append(boundary).append("--").append(LINE_FEED);
-        prWriter.flush();
+        writer.append(LINE_FEED).append("--" + boundary + "--").append(LINE_FEED);
+        writer.flush();
     }
 
     /**
@@ -151,19 +123,21 @@ public class FormUploader {
      * @param value - value of the header field
      */
     public void addHeaderField(String name, String value) {
-        prWriter.append(name).append(": ").append(value).append(LINE_FEED);
-        prWriter.flush();
+        writer.append(name).append(": ").append(value).append(LINE_FEED);
+        writer.flush();
     }
 
     /**
      * Completes the request and receives response from the server.
-     * returns a list of Strings as response in case the server returned
+     *
+     * @return a list of Strings as response in case the server returned
      * status OK, otherwise an exception is thrown.
+     * @throws IOException
      */
-    public void finish() {
-        prWriter.append(LINE_FEED);
-        prWriter.flush();
-        prWriter.append("--").append(boundary).append("--").append(LINE_FEED);
-        prWriter.close();
+    public void finish() throws IOException {
+        writer.append(LINE_FEED);
+        writer.flush();
+        writer.append("--").append(boundary).append("--").append(LINE_FEED);
+        writer.close();
     }
 }

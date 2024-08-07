@@ -1,5 +1,6 @@
 package com.getcapacitor.plugin.http;
 
+import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
@@ -11,14 +12,28 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 public class CapacitorCookieManager extends CookieManager {
 
     private final android.webkit.CookieManager webkitCookieManager;
+
+    private String encode(String value) {
+        try {
+            return URLEncoder.encode(value, StandardCharsets.UTF_8.toString());
+        } catch (UnsupportedEncodingException ex) {
+            return "";
+        }
+    }
+
+    private String decode(String value) {
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8.toString());
+        } catch (UnsupportedEncodingException ex) {
+            return "";
+        }
+    }
 
     /**
      * Create a new cookie manager for use with @capacitor-community/http with the default cookie
@@ -81,7 +96,7 @@ public class CapacitorCookieManager extends CookieManager {
                 String[] singleCookie = cookieString.split(";");
                 for (String c : singleCookie) {
                     HttpCookie parsed = HttpCookie.parse(c).get(0);
-                    parsed.setValue(parsed.getValue());
+                    parsed.setValue(decode(parsed.getValue()));
                     cookieList.add(parsed);
                 }
             }
@@ -111,7 +126,7 @@ public class CapacitorCookieManager extends CookieManager {
      * @param value the value of the {@code HttpCookie} given a key
      */
     public void setCookie(String url, String key, String value) {
-        String cookieValue = key + "=" + value;
+        String cookieValue = key + "=" + encode(value);
         setCookie(url, cookieValue);
     }
 
@@ -132,7 +147,7 @@ public class CapacitorCookieManager extends CookieManager {
     }
 
     @Override
-    public void put(URI uri, Map<String, List<String>> responseHeaders) {
+    public void put(URI uri, Map<String, List<String>> responseHeaders) throws IOException {
         // make sure our args are valid
         if ((uri == null) || (responseHeaders == null)) return;
 
@@ -145,14 +160,14 @@ public class CapacitorCookieManager extends CookieManager {
             if ((headerKey == null) || !(headerKey.equalsIgnoreCase("Set-Cookie2") || headerKey.equalsIgnoreCase("Set-Cookie"))) continue;
 
             // process each of the headers
-            for (String headerValue : Objects.requireNonNull(responseHeaders.get(headerKey))) {
+            for (String headerValue : responseHeaders.get(headerKey)) {
                 setCookie(url, headerValue);
             }
         }
     }
 
     @Override
-    public Map<String, List<String>> get(URI uri, Map<String, List<String>> requestHeaders) {
+    public Map<String, List<String>> get(URI uri, Map<String, List<String>> requestHeaders) throws IOException {
         // make sure our args are valid
         if ((uri == null) || (requestHeaders == null)) throw new IllegalArgumentException("Argument is null");
 
@@ -160,7 +175,7 @@ public class CapacitorCookieManager extends CookieManager {
         String url = uri.toString();
 
         // prepare our response
-        Map<String, List<String>> res = new HashMap<>();
+        Map<String, List<String>> res = new java.util.HashMap<String, List<String>>();
 
         // get the cookie
         String cookie = getCookieString(url);

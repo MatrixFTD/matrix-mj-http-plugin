@@ -20,41 +20,17 @@ import Foundation
         capConfig = bridge?.config
     }
     
-    @objc func http(_ call: CAPPluginCall, _ httpMethod: String?) {
+    @objc func request(_ call: CAPPluginCall) {
         // Protect against bad values from JS before calling request
         guard let u = call.getString("url") else { return call.reject("Must provide a URL"); }
-        guard let _ = httpMethod ?? call.getString("method") else { return call.reject("Must provide an HTTP Method"); }
+        guard let _ = call.getString("method") else { return call.reject("Must provide an HTTP Method"); }
         guard var _ = URL(string: u) else { return call.reject("Invalid URL"); }
     
         do {
-            try HttpRequestHandler.request(call, httpMethod)
+            try HttpRequestHandler.request(call)
         } catch let e {
             call.reject(e.localizedDescription)
         }
-    }
-    
-    @objc func request(_ call: CAPPluginCall) {
-        http(call, nil)
-    }
-    
-    @objc func get(_ call: CAPPluginCall) {
-        http(call, "GET")
-    }
-    
-    @objc func post(_ call: CAPPluginCall) {
-        http(call, "POST")
-    }
-    
-    @objc func put(_ call: CAPPluginCall) {
-        http(call, "PUT")
-    }
-    
-    @objc func patch(_ call: CAPPluginCall) {
-        http(call, "PATCH")
-    }
-    
-    @objc func del(_ call: CAPPluginCall) {
-        http(call, "DELETE")
     }
 
     @objc func downloadFile(_ call: CAPPluginCall) {
@@ -63,17 +39,8 @@ import Foundation
         guard let _ = call.getString("filePath") else { return call.reject("Must provide a file path to download the file to") }
         guard let _ = URL(string: u) else { return call.reject("Invalid URL") }
 
-        let progressEmitter: HttpRequestHandler.ProgressEmitter = {bytes, contentLength in
-            self.notifyListeners("progress", data: [
-                "type": "DOWNLOAD",
-                "url": u,
-                "bytes": bytes,
-                "contentLength": contentLength
-            ])
-        }
-
         do {
-            try HttpRequestHandler.download(call, updateProgress: progressEmitter)
+            try HttpRequestHandler.download(call)
         } catch let e {
             call.reject(e.localizedDescription)
         }
@@ -102,18 +69,6 @@ import Foundation
         if url != nil {
             cookieManager!.setCookie(url!, key, cookieManager!.encode(value))
             call.resolve()
-        }
-    }
-    
-    @objc func getCookiesMap(_ call: CAPPluginCall) {
-        let url = getServerUrl(call)
-        if url != nil {
-            let cookies = cookieManager!.getCookies(url!)
-            var cookiesMap: [String: String] = [:]
-            for cookie in cookies {
-                cookiesMap[cookie.name] = cookie.value
-            }
-            call.resolve(cookiesMap)
         }
     }
 
@@ -166,13 +121,9 @@ import Foundation
     @objc func clearCookies(_ call: CAPPluginCall) {
         let url = getServerUrl(call)
         if url != nil {
-            cookieManager!.clearCookies(url!)
+            let jar = HTTPCookieStorage.shared
+            jar.cookies(for: url!)?.forEach({ (cookie) in jar.deleteCookie(cookie) })
             call.resolve()
         }
-    }
-    
-    @objc func clearAllCookies(_ call: CAPPluginCall) {
-        cookieManager!.clearAllCookies()
-        call.resolve()
     }
 }

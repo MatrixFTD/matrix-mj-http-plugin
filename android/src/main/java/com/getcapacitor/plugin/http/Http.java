@@ -1,6 +1,7 @@
 package com.getcapacitor.plugin.http;
 
 import android.Manifest;
+import android.util.Base64;
 import android.util.Log;
 import com.getcapacitor.CapConfig;
 import com.getcapacitor.JSArray;
@@ -10,10 +11,28 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpCookie;
+import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 /**
  * Native HTTP Plugin
@@ -75,23 +94,6 @@ public class Http extends Plugin {
         }
     }
 
-    private void http(final PluginCall call, final String httpMethod) {
-        Runnable asyncHttpCall = new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    JSObject response = HttpRequestHandler.request(call, httpMethod);
-                    call.resolve(response);
-                } catch (Exception e) {
-                    System.out.println(e.toString());
-                    call.reject(e.getClass().getSimpleName(), e);
-                }
-            }
-        };
-        Thread httpThread = new Thread(asyncHttpCall);
-        httpThread.start();
-    }
-
     @Override
     public void load() {
         this.cookieManager = new CapacitorCookieManager(null, java.net.CookiePolicy.ACCEPT_ALL);
@@ -101,36 +103,30 @@ public class Http extends Plugin {
 
     @PluginMethod
     public void request(final PluginCall call) {
-        this.http(call, null);
+        new Thread(
+            new Runnable() {
+                public void run() {
+                    try {
+                        JSObject response = HttpRequestHandler.request(call);
+                        call.resolve(response);
+                    } catch (IOException e) {
+                        System.out.println(e.toString());
+                        call.reject("IO Exception");
+                    } catch (URISyntaxException e) {
+                        System.out.println(e.toString());
+                        call.reject("URI Syntax Exception");
+                    } catch (JSONException e) {
+                        System.out.println(e.toString());
+                        call.reject("JSON Exception");
+                    }
+                }
+            }
+        )
+            .start();
     }
 
     @PluginMethod
-    public void get(final PluginCall call) {
-        this.http(call, "GET");
-    }
-
-    @PluginMethod
-    public void post(final PluginCall call) {
-        this.http(call, "POST");
-    }
-
-    @PluginMethod
-    public void put(final PluginCall call) {
-        this.http(call, "PUT");
-    }
-
-    @PluginMethod
-    public void patch(final PluginCall call) {
-        this.http(call, "PATCH");
-    }
-
-    @PluginMethod
-    public void del(final PluginCall call) {
-        this.http(call, "DELETE");
-    }
-
-    @PluginMethod
-    public void downloadFile(final PluginCall call) {
+    public void downloadFile(PluginCall call) {
         try {
             bridge.saveCall(call);
             String fileDirectory = call.getString("fileDirectory", FilesystemUtils.DIRECTORY_DOCUMENTS);
@@ -140,31 +136,8 @@ public class Http extends Plugin {
                 isStoragePermissionGranted(call, Manifest.permission.WRITE_EXTERNAL_STORAGE)
             ) {
                 call.release(bridge);
+                JSObject response = HttpRequestHandler.downloadFile(call, getContext());
 
-                HttpRequestHandler.ProgressEmitter emitter = new HttpRequestHandler.ProgressEmitter() {
-                    @Override
-                    public void emit(Integer bytes, Integer contentLength) {
-                        // no-op
-                    }
-                };
-                Boolean progress = call.getBoolean("progress", false);
-                if (progress) {
-                    emitter =
-                        new HttpRequestHandler.ProgressEmitter() {
-                            @Override
-                            public void emit(final Integer bytes, final Integer contentLength) {
-                                JSObject ret = new JSObject();
-                                ret.put("type", "DOWNLOAD");
-                                ret.put("url", call.getString("url"));
-                                ret.put("bytes", bytes);
-                                ret.put("contentLength", contentLength);
-
-                                notifyListeners("progress", ret);
-                            }
-                        };
-                }
-
-                JSObject response = HttpRequestHandler.downloadFile(call, getContext(), emitter);
                 call.resolve(response);
             }
         } catch (MalformedURLException ex) {
@@ -267,18 +240,6 @@ public class Http extends Plugin {
 
     @PluginMethod
     public void clearCookies(PluginCall call) {
-        String url = getServerUrl(call);
-        if (!url.isEmpty()) {
-            HttpCookie[] cookies = cookieManager.getCookies(url);
-            for (HttpCookie cookie : cookies) {
-                cookieManager.setCookie(url, cookie.getName() + "=; Expires=Wed, 31 Dec 2000 23:59:59 GMT");
-            }
-            call.resolve();
-        }
-    }
-
-    @PluginMethod
-    public void clearAllCookies(PluginCall call) {
         cookieManager.removeAllCookies();
         call.resolve();
     }

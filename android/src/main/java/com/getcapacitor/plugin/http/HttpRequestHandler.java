@@ -6,6 +6,7 @@ import static com.getcapacitor.plugin.http.MimeType.APPLICATION_VND_API_JSON;
 import android.content.Context;
 import android.text.TextUtils;
 import android.util.Base64;
+import android.util.Log;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
@@ -24,40 +25,12 @@ import java.net.URL;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 public class HttpRequestHandler {
-
-    /**
-     * An enum specifying conventional HTTP Response Types
-     * See https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/responseType
-     */
-    public enum ResponseType {
-        ARRAY_BUFFER("arraybuffer"),
-        BLOB("blob"),
-        DOCUMENT("document"),
-        JSON("json"),
-        TEXT("text");
-
-        private final String name;
-
-        ResponseType(String name) {
-            this.name = name;
-        }
-
-        static final ResponseType DEFAULT = TEXT;
-
-        static ResponseType parse(String value) {
-            for (ResponseType responseType : values()) {
-                if (responseType.name.equalsIgnoreCase(value)) {
-                    return responseType;
-                }
-            }
-            return DEFAULT;
-        }
-    }
 
     /**
      * Internal builder class for building a CapacitorHttpUrlConnection
@@ -66,7 +39,6 @@ public class HttpRequestHandler {
 
         private Integer connectTimeout;
         private Integer readTimeout;
-        private Boolean disableRedirects;
         private JSObject headers;
         private String method;
         private URL url;
@@ -80,11 +52,6 @@ public class HttpRequestHandler {
 
         public HttpURLConnectionBuilder setReadTimeout(Integer readTimeout) {
             this.readTimeout = readTimeout;
-            return this;
-        }
-
-        public HttpURLConnectionBuilder setDisableRedirects(Boolean disableRedirects) {
-            this.disableRedirects = disableRedirects;
             return this;
         }
 
@@ -111,7 +78,6 @@ public class HttpRequestHandler {
 
             if (connectTimeout != null) connection.setConnectTimeout(connectTimeout);
             if (readTimeout != null) connection.setReadTimeout(readTimeout);
-            if (disableRedirects != null) connection.setDisableRedirects(disableRedirects);
 
             connection.setRequestHeaders(headers);
             return this;
@@ -122,16 +88,11 @@ public class HttpRequestHandler {
         }
 
         public HttpURLConnectionBuilder setUrlParams(JSObject params, boolean shouldEncode)
-            throws URISyntaxException, MalformedURLException {
+            throws URISyntaxException, MalformedURLException, JSONException {
             String initialQuery = url.getQuery();
             String initialQueryBuilderStr = initialQuery == null ? "" : initialQuery;
 
             Iterator<String> keys = params.keys();
-            
-            if (!keys.hasNext()) {
-                return this;
-            }
-            
             StringBuilder urlQueryBuilder = new StringBuilder(initialQueryBuilderStr);
 
             // Build the new query string
@@ -167,7 +128,7 @@ public class HttpRequestHandler {
                 URI encodedUri = new URI(uri.getScheme(), uri.getAuthority(), uri.getPath(), urlQuery, uri.getFragment());
                 this.url = encodedUri.toURL();
             } else {
-                String unEncodedUrlString = uri.getScheme() + "://" + uri.getAuthority() + uri.getPath() + ((!urlQuery.equals("")) ? "?" + urlQuery : "") + ((uri.getFragment() != null) ? uri.getFragment() : "");
+                String unEncodedUrlString = uri.getScheme() + uri.getAuthority() + uri.getPath() + urlQuery + uri.getFragment();
                 this.url = new URL(unEncodedUrlString);
             }
 
@@ -180,24 +141,37 @@ public class HttpRequestHandler {
     }
 
     /**
-     * Builds an HTTP Response given CapacitorHttpUrlConnection and ResponseType objects.
-     *   Defaults to ResponseType.DEFAULT
-     * @param connection The CapacitorHttpUrlConnection to respond with
-     * @throws IOException Thrown if the InputStream is unable to be parsed correctly
-     * @throws JSONException Thrown if the JSON is unable to be parsed
+     * See https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/responseType
      */
-    private static JSObject buildResponse(CapacitorHttpUrlConnection connection) throws IOException, JSONException {
-        return buildResponse(connection, ResponseType.DEFAULT);
+    public enum ResponseType {
+        ARRAY_BUFFER("arraybuffer"),
+        BLOB("blob"),
+        DOCUMENT("document"),
+        JSON("json"),
+        TEXT("text");
+
+        private final String name;
+
+        ResponseType(String name) {
+            this.name = name;
+        }
+
+        static final ResponseType DEFAULT = TEXT;
+
+        static ResponseType parse(String value) {
+            for (ResponseType responseType : values()) {
+                if (responseType.name.equalsIgnoreCase(value)) {
+                    return responseType;
+                }
+            }
+            return DEFAULT;
+        }
     }
 
-    /**
-     * Builds an HTTP Response given CapacitorHttpUrlConnection and ResponseType objects
-     * @param connection The CapacitorHttpUrlConnection to respond with
-     * @param responseType The requested ResponseType
-     * @return A JSObject that contains the HTTPResponse to return to the browser
-     * @throws IOException Thrown if the InputStream is unable to be parsed correctly
-     * @throws JSONException Thrown if the JSON is unable to be parsed
-     */
+    private static void buildResponse(CapacitorHttpUrlConnection conn) throws IOException, JSONException {
+        buildResponse(conn, ResponseType.DEFAULT);
+    }
+
     private static JSObject buildResponse(CapacitorHttpUrlConnection connection, ResponseType responseType)
         throws IOException, JSONException {
         int statusCode = connection.getResponseCode();
@@ -208,22 +182,11 @@ public class HttpRequestHandler {
         output.put("url", connection.getURL());
         output.put("data", readData(connection, responseType));
 
-        InputStream errorStream = connection.getErrorStream();
-        if (errorStream != null) {
-            output.put("error", true);
-        }
+        // Log.d(getLogTag(), "Request completed, got data");
 
         return output;
     }
 
-    /**
-     * Read the existing ICapacitorHttpUrlConnection data
-     * @param connection The ICapacitorHttpUrlConnection object to read in
-     * @param responseType The type of HTTP response to return to the API
-     * @return The parsed data from the connection
-     * @throws IOException Thrown if the InputStreams cannot be properly parsed
-     * @throws JSONException Thrown if the JSON is malformed when parsing as JSON
-     */
     static Object readData(ICapacitorHttpUrlConnection connection, ResponseType responseType) throws IOException, JSONException {
         InputStream errorStream = connection.getErrorStream();
         String contentType = connection.getHeaderField("Content-Type");
@@ -253,12 +216,6 @@ public class HttpRequestHandler {
         }
     }
 
-    /**
-     * Helper function for determining if the Content-Type is a typeof an existing Mime-Type
-     * @param contentType The Content-Type string to check for
-     * @param mimeTypes The Mime-Type values to check against
-     * @return
-     */
     private static boolean isOneOf(String contentType, MimeType... mimeTypes) {
         if (contentType != null) {
             for (MimeType mimeType : mimeTypes) {
@@ -270,11 +227,6 @@ public class HttpRequestHandler {
         return false;
     }
 
-    /**
-     * Build the JSObject response headers based on the connection header map
-     * @param connection The CapacitorHttpUrlConnection connection
-     * @return A JSObject of the header values from the CapacitorHttpUrlConnection
-     */
     private static JSObject buildResponseHeaders(CapacitorHttpUrlConnection connection) {
         JSObject output = new JSObject();
 
@@ -293,14 +245,9 @@ public class HttpRequestHandler {
      * @throws JSONException thrown if the JSON is malformed
      */
     private static Object parseJSON(String input) throws JSONException {
-        JSONObject json = new JSONObject();
         try {
             if ("null".equals(input.trim())) {
                 return JSONObject.NULL;
-            } else if ("true".equals(input.trim())) {
-                return new JSONObject().put("flag", "true");
-            } else if ("false".equals(input.trim())) {
-                return new JSONObject().put("flag", "false");
             } else {
                 try {
                     return new JSObject(input);
@@ -313,12 +260,6 @@ public class HttpRequestHandler {
         }
     }
 
-    /**
-     * Returns a string based on a base64 InputStream
-     * @param in The base64 InputStream to convert to a String
-     * @return String value of InputStream
-     * @throws IOException thrown if the InputStream is unable to be read as base64
-     */
     private static String readStreamAsBase64(InputStream in) throws IOException {
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[1024];
@@ -331,22 +272,12 @@ public class HttpRequestHandler {
         }
     }
 
-    /**
-     * Returns a string based on an InputStream
-     * @param in The InputStream to convert to a String
-     * @return String value of InputStream
-     * @throws IOException thrown if the InputStream is unable to be read
-     */
     private static String readStreamAsString(InputStream in) throws IOException {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(in))) {
             StringBuilder builder = new StringBuilder();
-            String line = reader.readLine();
-            while (line != null) {
-                builder.append(line);
-                line = reader.readLine();
-                if (line != null) {
-                    builder.append(System.getProperty("line.separator"));
-                }
+            String line;
+            while ((line = reader.readLine()) != null) {
+                builder.append(line).append(System.getProperty("line.separator"));
             }
             return builder.toString();
         }
@@ -355,22 +286,18 @@ public class HttpRequestHandler {
     /**
      * Makes an Http Request based on the PluginCall parameters
      * @param call The Capacitor PluginCall that contains the options need for an Http request
-     * @param httpMethod The HTTP method that overrides the PluginCall HTTP method
      * @throws IOException throws an IO request when a connection can't be made
      * @throws URISyntaxException thrown when the URI is malformed
      * @throws JSONException thrown when the incoming JSON is malformed
      */
-    public static JSObject request(PluginCall call, String httpMethod) throws IOException, URISyntaxException, JSONException {
+    public static JSObject request(PluginCall call) throws IOException, URISyntaxException, JSONException {
         String urlString = call.getString("url", "");
+        String method = call.getString("method", "").toUpperCase();
         JSObject headers = call.getObject("headers");
         JSObject params = call.getObject("params");
         Integer connectTimeout = call.getInt("connectTimeout");
         Integer readTimeout = call.getInt("readTimeout");
-        Boolean disableRedirects = call.getBoolean("disableRedirects");
-        Boolean shouldEncode = call.getBoolean("shouldEncodeUrlParams", true);
         ResponseType responseType = ResponseType.parse(call.getString("responseType"));
-
-        String method = httpMethod != null ? httpMethod.toUpperCase() : call.getString("method", "").toUpperCase();
 
         boolean isHttpMutate = method.equals("DELETE") || method.equals("PATCH") || method.equals("POST") || method.equals("PUT");
 
@@ -379,21 +306,18 @@ public class HttpRequestHandler {
             .setUrl(url)
             .setMethod(method)
             .setHeaders(headers)
-            .setUrlParams(params, shouldEncode)
+            .setUrlParams(params)
             .setConnectTimeout(connectTimeout)
             .setReadTimeout(readTimeout)
-            .setDisableRedirects(disableRedirects)
             .openConnection();
 
         CapacitorHttpUrlConnection connection = connectionBuilder.build();
 
         // Set HTTP body on a non GET or HEAD request
         if (isHttpMutate) {
-            JSValue data = new JSValue(call, "data");
-            if (data.getValue() != null) {
-                connection.setDoOutput(true);
-                connection.setRequestBody(call, data);
-            }
+            JSObject data = call.getObject("data");
+            connection.setDoOutput(true);
+            connection.setRequestBody(data);
         }
 
         connection.connect();
@@ -405,14 +329,12 @@ public class HttpRequestHandler {
      * Makes an Http Request to download a file based on the PluginCall parameters
      * @param call The Capacitor PluginCall that contains the options need for an Http request
      * @param context The Android Context required for writing to the filesystem
-     * @param progress The emitter which notifies listeners on downloading progression
      * @throws IOException throws an IO request when a connection can't be made
      * @throws URISyntaxException thrown when the URI is malformed
      */
-    public static JSObject downloadFile(PluginCall call, Context context, ProgressEmitter progress)
-        throws IOException, URISyntaxException, JSONException {
+    public static JSObject downloadFile(PluginCall call, Context context) throws IOException, URISyntaxException, JSONException {
         String urlString = call.getString("url");
-        String method = call.getString("method", "GET").toUpperCase();
+        String method = call.getString("method").toUpperCase();
         String filePath = call.getString("filePath");
         String fileDirectory = call.getString("fileDirectory", FilesystemUtils.DIRECTORY_DOCUMENTS);
         JSObject headers = call.getObject("headers");
@@ -437,24 +359,11 @@ public class HttpRequestHandler {
 
         FileOutputStream fileOutputStream = new FileOutputStream(file, false);
 
-        String contentLength = connection.getHeaderField("content-length");
-        int bytes = 0;
-        int maxBytes = 0;
-
-        try {
-            maxBytes = contentLength != null ? Integer.parseInt(contentLength) : 0;
-        } catch (NumberFormatException e) {
-            maxBytes = 0;
-        }
-
         byte[] buffer = new byte[1024];
         int len;
 
         while ((len = connectionInputStream.read(buffer)) > 0) {
             fileOutputStream.write(buffer, 0, len);
-
-            bytes += len;
-            progress.emit(bytes, maxBytes);
         }
 
         connectionInputStream.close();
@@ -477,7 +386,7 @@ public class HttpRequestHandler {
      */
     public static JSObject uploadFile(PluginCall call, Context context) throws IOException, URISyntaxException, JSONException {
         String urlString = call.getString("url");
-        String method = call.getString("method", "POST").toUpperCase();
+        String method = call.getString("method").toUpperCase();
         String filePath = call.getString("filePath");
         String fileDirectory = call.getString("fileDirectory", FilesystemUtils.DIRECTORY_DOCUMENTS);
         String name = call.getString("name", "file");
@@ -509,10 +418,5 @@ public class HttpRequestHandler {
         builder.finish();
 
         return buildResponse(connection, responseType);
-    }
-
-    @FunctionalInterface
-    public interface ProgressEmitter {
-        void emit(Integer bytes, Integer contentLength);
     }
 }
